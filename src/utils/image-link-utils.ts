@@ -1,32 +1,32 @@
 import { EditorView } from "@codemirror/view";
 
 /**
- * 从文本行中提取第一个可识别的图片路径。
- * 优先匹配 HTML <img> 标签，然后是 Markdown，最后是 Wikilink。
- * @param textLine 包含图片语法的文本行
- * @returns 图片路径字符串，如果未找到则为 null
- * @deprecated 该函数已被弃用，建议使用 parseImageSyntaxFromLine 函数。
+ * Extracts the first recognizable image path from a text line.
+ * Prioritizes matching HTML <img> tags, then Markdown, and finally Wikilinks.
+ * @param textLine The text line containing image syntax
+ * @returns Image path string, or null if not found
+ * @deprecated This function is deprecated, please use parseImageSyntaxFromLine function instead.
  */
 export function extractFirstImagePath(textLine: string): string | null {
 	if (!textLine) {
 		return null;
 	}
 
-	// 1. 尝试匹配 HTML <img> 标签 (包括有无 style 的情况)
+	// 1. Try to match HTML <img> tags (with or without style)
 	const htmlRegex = /<img\s[^>]*src=(?:["']([^"']+)["']|([^>\s]+))/i;
 	let match = textLine.match(htmlRegex);
 	if (match && (match[1] || match[2])) {
 		return (match[1] || match[2]).trim();
 	}
 
-	// 2. 尝试匹配 Markdown 风格链接 `![](path)` 或 `![alt](path "title")`
+	// 2. Try to match Markdown style links `![](path)` or `![alt](path "title")`
 	const markdownRegex = /!\[[^\]]*\]\(([^)\s]+)(?:\s[^)]*)?\)/;
 	match = textLine.match(markdownRegex);
 	if (match && match[1]) {
 		return match[1].trim();
 	}
 
-	// 3. 尝试匹配 Wikilink 风格链接 `![[path]]` 或 `![[path|alias]]`
+	// 3. Try to match Wikilink style links `![[path]]` or `![[path|alias]]`
 	const wikilinkRegex = /!\[\[([^|\]]+)(?:\|[^\]]*)?\]\]/;
 	match = textLine.match(wikilinkRegex);
 	if (match && match[1]) {
@@ -41,28 +41,28 @@ interface ParsedImageInfo {
 	altText?: string;
 	specifiedWidth?: number;
 	specifiedHeight?: number;
-	originalMatch: string; // 完整匹配到的原始Markdown/Wikilink字符串
-	startIndexInLine: number; // 原始匹配在行文本中的起始索引
+	originalMatch: string; // Complete original Markdown/Wikilink string that was matched
+	startIndexInLine: number; // Starting index of the original match in the line text
 	isHtml: boolean;
-	currentZoomPercent?: number; // 当前缩放百分比
+	currentZoomPercent?: number; // Current zoom percentage
 }
 
 /**
- * 解析文本行中的图片语法，仅限 Markdown
- * @param lineText 包含图片语法的文本行
- * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ * Parses image syntax in text line, Markdown only
+ * @param lineText The text line containing image syntax
+ * @returns Match result object containing image path, alt text, specified width/height, etc.
  */
 function parseMarkdown(lineText: string): ParsedImageInfo | null {
-	// 优先匹配 Markdown: ![alt|WxH](path) 或 ![alt](path) 或 ![|WxH](path)
-	// 组1: Alt Text (可以包含空格，但不能包含 ']')
-	// 组2: 尺寸 WxH 或 W (如果组2存在)
-	// 组3: 路径
+	// Priority matching Markdown: ![alt|WxH](path) or ![alt](path) or ![|WxH](path)
+	// Group 1: Alt Text (can contain spaces, but not ']')
+	// Group 2: Dimensions WxH or W (if group 2 exists)
+	// Group 3: Path
 	const markdownRegex = /!\[(.*?)?(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/;
 	const match = lineText.match(markdownRegex);
 
 	if (match) {
-		const altText = match[1] || undefined; // Obsidian 的 alt 可能  是空的
-		const dimensionsString = match[2]; // 例如 "100x200" 或 "100"
+		const altText = match[1] || undefined; // Obsidian's alt can be empty
+		const dimensionsString = match[2]; // For example "100x200" or "100"
 		const path = match[3].trim();
 		let specifiedWidth: number | undefined;
 		let specifiedHeight: number | undefined;
@@ -90,34 +90,34 @@ function parseMarkdown(lineText: string): ParsedImageInfo | null {
 }
 
 /**
- * 解析文本行中的图片语法，仅限 Wikilink
- * @param lineText 包含图片语法的文本行
- * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ * Parses image syntax in text line, Wikilink only
+ * @param lineText The text line containing image syntax
+ * @returns Match result object containing image path, alt text, specified width/height, etc.
  */
 function parseWikilink(lineText: string): ParsedImageInfo | null {
-	// 匹配 Wikilink: ![[path|WxH]] 或 ![[path|W]] 或 ![[path|alt]] 或 ![[path]]
-	// 组1: 路径
-	// 组2: 管道符后的内容 (alt 或 WxH 或 W) (可选)
+	// Match Wikilink: ![[path|WxH]] or ![[path|W]] or ![[path|alt]] or ![[path]]
+	// Group 1: Path
+	// Group 2: Content after pipe (alt or WxH or W) (optional)
 	const wikilinkRegex = /!\[\[([^|\]]+)(?:\|([^|\]]*))?\]\]/;
 	const match = lineText.match(wikilinkRegex);
 	if (match) {
 		const path = match[1].trim();
-		const altOrDimensions = match[2]; // 可能为 undefined, "alt text", "100", "100x200"
+		const altOrDimensions = match[2]; // Could be undefined, "alt text", "100", "100x200"
 		let specifiedWidth: number | undefined;
 		let specifiedHeight: number | undefined;
-		let altText: string | undefined = altOrDimensions; // 默认为 alt text
+		let altText: string | undefined = altOrDimensions; // Default to alt text
 
 		if (altOrDimensions) {
-			const dimMatch = altOrDimensions.match(/^(\d+)(?:x(\d+))?$/); // 严格匹配 WxH 或 W
+			const dimMatch = altOrDimensions.match(/^(\d+)(?:x(\d+))?$/); // Strict match for WxH or W
 			if (dimMatch) {
-				// 是尺寸字符串
+				// It's a dimension string
 				if (dimMatch[1]) {
 					specifiedWidth = parseInt(dimMatch[1], 10);
 				}
 				if (dimMatch[2]) {
 					specifiedHeight = parseInt(dimMatch[2], 10);
 				}
-				altText = undefined; // 如果是尺寸，则它不是 alt text
+				altText = undefined; // If it's a dimension, it's not alt text
 			}
 		}
 		return {
@@ -134,9 +134,9 @@ function parseWikilink(lineText: string): ParsedImageInfo | null {
 }
 
 /**
- * 解析文本行中的 HTML <img> 标签
- * @param lineText 包含图片语法的文本行
- * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ * Parses HTML <img> tags in text line
+ * @param lineText The text line containing image syntax
+ * @returns Match result object containing image path, alt text, specified width/height, etc.
  */
 function parseHtml(lineText: string): ParsedImageInfo | null {
 	const htmlImgRegex =
@@ -144,10 +144,10 @@ function parseHtml(lineText: string): ParsedImageInfo | null {
 	const htmlMatch = lineText.match(htmlImgRegex);
 
 	if (htmlMatch) {
-		const originalHtmlTag = htmlMatch[0]; // 整个匹配到的 <img> 标签
-		const path = htmlMatch[2] || htmlMatch[3]; // src 值
-		const altText = htmlMatch[4] || htmlMatch[5] || undefined; // alt 值
-		const styleString = htmlMatch[6] || htmlMatch[7] || undefined; // style 属性内容
+		const originalHtmlTag = htmlMatch[0]; // The entire matched <img> tag
+		const path = htmlMatch[2] || htmlMatch[3]; // src value
+		const altText = htmlMatch[4] || htmlMatch[5] || undefined; // alt value
+		const styleString = htmlMatch[6] || htmlMatch[7] || undefined; // style attribute content
 
 		let specifiedWidth: number | undefined;
 		let specifiedHeight: number | undefined;
@@ -164,14 +164,14 @@ function parseHtml(lineText: string): ParsedImageInfo | null {
 				specifiedHeight = parseInt(heightMatch[1], 10);
 			}
 
-			const zoomMatch = styleString.match(/zoom:\s*(\d+)%?/i); // zoom值后的 % 是可选的
+			const zoomMatch = styleString.match(/zoom:\s*(\d+)%?/i); // The % after zoom value is optional
 			if (zoomMatch && zoomMatch[1]) {
 				currentZoomP = parseInt(zoomMatch[1], 10);
 			}
 		}
 
 		if (path) {
-			// 必须要有src属性
+			// Must have src attribute
 			return {
 				path: path.trim(),
 				altText: altText ? altText.trim() : undefined,
@@ -185,13 +185,13 @@ function parseHtml(lineText: string): ParsedImageInfo | null {
 		}
 	}
 
-	return null; // 未匹配到可识别的图片语法
+	return null; // No recognizable image syntax matched
 }
 
 /**
- * 从文本行中解析图片语法，支持 Markdown、Wikilink 和 HTML <img> 标签。
- * @param lineText 包含图片语法的文本行
- * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ * Parses image syntax from text line, supporting Markdown, Wikilink, and HTML <img> tags.
+ * @param lineText The text line containing image syntax
+ * @returns Match result object containing image path, alt text, specified width/height, etc.
  */
 export function parseImageSyntaxFromLine(
 	lineText: string
@@ -200,10 +200,10 @@ export function parseImageSyntaxFromLine(
 	if (result) return result;
 	result = parseWikilink(lineText);
 	if (result) return result;
-	return parseHtml(lineText); // 最后尝试 HTML <img> 标签
+	return parseHtml(lineText); // Finally, try HTML <img> tags
 }
 
-// 辅助函数: 转义HTML特殊字符 (用于alt属性)
+// Helper function: Escape HTML special characters (for alt attribute)
 export function escapeHtml(unsafe: string): string {
 	return unsafe
 		.replace(/&/g, "&amp;")
@@ -213,13 +213,13 @@ export function escapeHtml(unsafe: string): string {
 		.replace(/'/g, "&#039;");
 }
 
-// 辅助函数: 转义正则表达式特殊字符
+// Helper function: Escape regular expression special characters
 export function escapeRegExp(string: string): string {
 	return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// 辅助函数：尝试从DOM元素向上追溯，找到其在CodeMirror文档中的位置和对应行的文本
-// 这对于处理嵌套在复杂Widget中的图片元素尤其重要
+// Helper function: Try to trace upwards from a DOM element to find its position in the CodeMirror document and the corresponding line text
+// This is especially important for handling image elements nested in complex Widgets
 export function getLineInfoFromElement(
 	view: EditorView,
 	element: HTMLElement
@@ -239,7 +239,7 @@ export function getLineInfoFromElement(
 
 	try {
 		const line = view.state.doc.lineAt(pos);
-		console.log("获取行信息成功:", line, pos);
+		console.log("Successfully got line info:", line, pos);
 		return {
 			pos,
 			lineText: line.text,
@@ -250,4 +250,22 @@ export function getLineInfoFromElement(
 		console.error("Error getting line text from element position:", pos, e);
 		return null;
 	}
+}
+
+export interface LineDetails {
+	pos: number;
+	lineText: string;
+	lineFrom: number;
+	lineTo: number;
+}
+
+export interface ImageSyntaxInfo {
+	path: string | null;
+	altText?: string;
+	isHtml: boolean;
+	specifiedWidth?: number;
+	specifiedHeight?: number;
+	currentZoomPercent?: number;
+	originalMatch: string;
+	startIndexInLine: number;
 }
