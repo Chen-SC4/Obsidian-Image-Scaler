@@ -6,3 +6,21 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.image-hover-highlight {
+	/* 使用 box-shadow 来模拟边框效果 */
+	/* 参数解释: offset-x | offset-y | blur-radius | spread-radius | color */
+	/* 这里我们用 spread-radius 来创建实心边框的外观 */
+	box-shadow: 0 0 5px 10px dodgerblue;
+
+	/* outline 通常不影响布局，可以保留。它会画在 box-shadow 的外部。 */
+	outline: 1px solid rgba(0, 0, 0, 0.2);
+
+	/* box-sizing: border-box; 仍然是一个好习惯，
+	   虽然在这个具体问题中，由于我们移除了实际的 border，它的直接作用减小了。*/
+	box-sizing: border-box;
+
+	/* 由于 'border' 属性被移除了，你需要更新 transition 属性
+	   如果你希望 box-shadow 的出现/颜色变化有动画效果。*/
+	transition: box-shadow 0.1s ease-in-out, outline-color 0.1s ease-in-out;
+}
