@@ -1,14 +1,11 @@
-/**
- * 从给定的文本中提取第一个找到的图片链接的路径。
- * 支持 Markdown 格式 `![alt](path)` 和 Wikilink 格式 `![[path]]` 或 `![[path|alias]]`。
- * @param textLine 包含图片链接的文本行或字符串片段。
- * @returns 如果找到图片路径，则返回该路径字符串；否则返回 null。
- */
+import { EditorView } from "@codemirror/view";
+
 /**
  * 从文本行中提取第一个可识别的图片路径。
  * 优先匹配 HTML <img> 标签，然后是 Markdown，最后是 Wikilink。
  * @param textLine 包含图片语法的文本行
  * @returns 图片路径字符串，如果未找到则为 null
+ * @deprecated 该函数已被弃用，建议使用 parseImageSyntaxFromLine 函数。
  */
 export function extractFirstImagePath(textLine: string): string | null {
 	if (!textLine) {
@@ -16,9 +13,6 @@ export function extractFirstImagePath(textLine: string): string | null {
 	}
 
 	// 1. 尝试匹配 HTML <img> 标签 (包括有无 style 的情况)
-	//    - src="path"
-	//    - src='path'
-	//    - src=path (无引号，较少见但技术上可能)
 	const htmlRegex = /<img\s[^>]*src=(?:["']([^"']+)["']|([^>\s]+))/i;
 	let match = textLine.match(htmlRegex);
 	if (match && (match[1] || match[2])) {
@@ -53,12 +47,16 @@ interface ParsedImageInfo {
 	currentZoomPercent?: number; // 当前缩放百分比
 }
 
+/**
+ * 解析文本行中的图片语法，仅限 Markdown
+ * @param lineText 包含图片语法的文本行
+ * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ */
 function parseMarkdown(lineText: string): ParsedImageInfo | null {
 	// 优先匹配 Markdown: ![alt|WxH](path) 或 ![alt](path) 或 ![|WxH](path)
 	// 组1: Alt Text (可以包含空格，但不能包含 ']')
-	// 组2: 管道符和尺寸 |WxH (可选)
-	// 组3: 尺寸 WxH 或 W (如果组2存在)
-	// 组4: 路径
+	// 组2: 尺寸 WxH 或 W (如果组2存在)
+	// 组3: 路径
 	const markdownRegex = /!\[(.*?)?(?:\|(\d+(?:x\d+)?))?\]\(([^)]+)\)/;
 	const match = lineText.match(markdownRegex);
 
@@ -91,6 +89,11 @@ function parseMarkdown(lineText: string): ParsedImageInfo | null {
 	return null;
 }
 
+/**
+ * 解析文本行中的图片语法，仅限 Wikilink
+ * @param lineText 包含图片语法的文本行
+ * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ */
 function parseWikilink(lineText: string): ParsedImageInfo | null {
 	// 匹配 Wikilink: ![[path|WxH]] 或 ![[path|W]] 或 ![[path|alt]] 或 ![[path]]
 	// 组1: 路径
@@ -130,6 +133,11 @@ function parseWikilink(lineText: string): ParsedImageInfo | null {
 	return null;
 }
 
+/**
+ * 解析文本行中的 HTML <img> 标签
+ * @param lineText 包含图片语法的文本行
+ * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ */
 function parseHtml(lineText: string): ParsedImageInfo | null {
 	const htmlImgRegex =
 		/(<img\s+(?:[^>]*?\s+)?src=(?:["']([^"']+)["']|([^>\s]+))(?:\s+[^>]*?\s*alt=(?:["']([^"']*)["']|([^>\s]*)))?(?:\s+[^>]*?\s*style=(?:["']([^"']+)["']|([^>\s]+)))?[^>]*?>)/i;
@@ -180,6 +188,11 @@ function parseHtml(lineText: string): ParsedImageInfo | null {
 	return null; // 未匹配到可识别的图片语法
 }
 
+/**
+ * 从文本行中解析图片语法，支持 Markdown、Wikilink 和 HTML <img> 标签。
+ * @param lineText 包含图片语法的文本行
+ * @returns 匹配结果对象，包含图片路径、alt文本、指定宽高等信息
+ */
 export function parseImageSyntaxFromLine(
 	lineText: string
 ): ParsedImageInfo | null {
@@ -188,4 +201,53 @@ export function parseImageSyntaxFromLine(
 	result = parseWikilink(lineText);
 	if (result) return result;
 	return parseHtml(lineText); // 最后尝试 HTML <img> 标签
+}
+
+// 辅助函数: 转义HTML特殊字符 (用于alt属性)
+export function escapeHtml(unsafe: string): string {
+	return unsafe
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
+}
+
+// 辅助函数: 转义正则表达式特殊字符
+export function escapeRegExp(string: string): string {
+	return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// 辅助函数：尝试从DOM元素向上追溯，找到其在CodeMirror文档中的位置和对应行的文本
+// 这对于处理嵌套在复杂Widget中的图片元素尤其重要
+export function getLineInfoFromElement(
+	view: EditorView,
+	element: HTMLElement
+): { pos: number; lineText: string; lineFrom: number; lineTo: number } | null {
+	let pos: number | undefined;
+
+	if (pos === undefined) {
+		try {
+			pos = view.posAtDOM(element);
+		} catch (e) {
+			// console.warn("posAtDOM failed for element:", element, e);
+			return null;
+		}
+	}
+
+	if (pos === null || pos === undefined) return null;
+
+	try {
+		const line = view.state.doc.lineAt(pos);
+		console.log("获取行信息成功:", line, pos);
+		return {
+			pos,
+			lineText: line.text,
+			lineFrom: line.from,
+			lineTo: line.to,
+		};
+	} catch (e) {
+		console.error("Error getting line text from element position:", pos, e);
+		return null;
+	}
 }

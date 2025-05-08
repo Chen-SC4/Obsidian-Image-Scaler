@@ -1,41 +1,12 @@
 import { Plugin } from "obsidian";
 import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
-import { parseImageSyntaxFromLine } from "./utils"; // 导入提取图片路径的工具函数
+import {
+	parseImageSyntaxFromLine,
+	escapeHtml,
+	escapeRegExp,
+	getLineInfoFromElement,
+} from "./utils"; // 导入提取图片路径的工具函数
 // 导入 EditorState, EditorSelection, Transaction 用于修改编辑器内容
-
-// 辅助函数：尝试从DOM元素向上追溯，找到其在CodeMirror文档中的位置和对应行的文本
-// 这对于处理嵌套在复杂Widget中的图片元素尤其重要
-function getLineInfoFromElement(
-	view: EditorView,
-	element: HTMLElement
-): { pos: number; lineText: string; lineFrom: number; lineTo: number } | null {
-	let pos: number | undefined;
-
-	if (pos === undefined) {
-		try {
-			pos = view.posAtDOM(element);
-		} catch (e) {
-			// console.warn("posAtDOM failed for element:", element, e);
-			return null;
-		}
-	}
-
-	if (pos === null || pos === undefined) return null;
-
-	try {
-		const line = view.state.doc.lineAt(pos);
-		console.log("获取行信息成功:", line, pos);
-		return {
-			pos,
-			lineText: line.text,
-			lineFrom: line.from,
-			lineTo: line.to,
-		};
-	} catch (e) {
-		console.error("Error getting line text from element position:", pos, e);
-		return null;
-	}
-}
 
 export default class ObsidianImageEnhancePlugin extends Plugin {
 	async onload() {
@@ -529,8 +500,8 @@ class ImageHoverViewPlugin {
 		// 它应该能匹配到 <img src="path" ... style="..."> 结构
 		const imgTagToReplaceRegex = new RegExp(
 			`<img\\s+src=(?:["']${escapeRegExp(
-				this.draggedImageInfo.path!
-			)}["']|${escapeRegExp(this.draggedImageInfo.path!)})` + // 匹配src
+				this.draggedImageInfo.path ?? ""
+			)}["']|${escapeRegExp(this.draggedImageInfo.path ?? "")})` + // 匹配src
 				`[^>]*>`, // 匹配到标签结束
 			"i"
 		);
@@ -585,19 +556,4 @@ class ImageHoverViewPlugin {
 		}
 		this.resetDragState();
 	}
-}
-
-// 辅助函数: 转义HTML特殊字符 (用于alt属性)
-function escapeHtml(unsafe: string): string {
-	return unsafe
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
-}
-
-// 辅助函数: 转义正则表达式特殊字符
-function escapeRegExp(string: string): string {
-	return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
