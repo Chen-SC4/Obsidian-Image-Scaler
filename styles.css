@@ -6,3 +6,10 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+
+.image-hover-highlight {
+	border: 2px solid dodgerblue;
+	outline: 1px solid rgba(0, 0, 0, 0.2);
+	box-sizing: border-box;
+	transition: border-color 0.1s ease-in-out, outline-color 0.1s ease-in-out;
+}
