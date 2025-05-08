@@ -1,6 +1,6 @@
 import { Plugin } from "obsidian";
 import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
-import { extractFirstImagePath } from "./utils"; // 导入提取图片路径的工具函数
+import { parseImageSyntaxFromLine } from "./utils"; // 导入提取图片路径的工具函数
 // 导入 EditorState, EditorSelection, Transaction 用于修改编辑器内容
 
 // 辅助函数：尝试从DOM元素向上追溯，找到其在CodeMirror文档中的位置和对应行的文本
@@ -74,7 +74,12 @@ class ImageHoverViewPlugin {
 		lineFrom: number;
 		lineTo: number;
 	} | null = null; // 拖拽开始时的行信息
-	private originalImagePath: string | null = null; // 拖拽开始时解析到的原始图片路径
+	private draggedImageInfo: {
+		path: string | null;
+		altText?: string;
+		sourceWidth?: number;
+		sourceHeight?: number;
+	} | null = null; // 拖拽开始时的图片信息
 	private imageCenterX = 0; // 图片中心点X坐标
 	private imageCenterY = 0; // 图片中心点Y坐标
 	private initialDistanceToCenter = 0; // 鼠标按下时，点到图片中心的初始距离
@@ -140,7 +145,7 @@ class ImageHoverViewPlugin {
 		);
 		document.removeEventListener("mouseup", this.handleDocumentMouseUp);
 		this.lineInfoAtDragStart = null;
-		this.originalImagePath = null;
+		this.draggedImageInfo = null;
 		// console.log("拖拽状态已重置。");
 		// 恢复光标等，如果需要
 		if (this.lastHoveredImg) {
@@ -307,124 +312,118 @@ class ImageHoverViewPlugin {
 		imgElement: HTMLImageElement
 	) {
 		const cursorStyle = imgElement.style.cursor;
-		// 只有当光标是缩放光标时才开始拖拽缩放逻辑
 		if (cursorStyle && cursorStyle.includes("-resize")) {
-			event.preventDefault(); // 阻止默认行为，如图片被拖动或文本被选中
-			event.stopPropagation(); // 阻止事件冒泡
+			event.preventDefault();
+			event.stopPropagation();
 
-			const rect = imgElement.getBoundingClientRect();
-			this.imageCenterX = rect.left + rect.width / 2;
-			this.imageCenterY = rect.top + rect.height / 2;
-
-			this.isDragging = true;
-			this.dragStartX = event.clientX;
-			this.dragStartY = event.clientY;
-
-			const dxToCenterInitial = event.clientX - this.imageCenterX;
-			const dyToCenterInitial = event.clientY - this.imageCenterY;
-			this.initialDistanceToCenter = Math.sqrt(
-				dxToCenterInitial * dxToCenterInitial +
-					dyToCenterInitial * dyToCenterInitial
-			);
-
-			// 记录图片初始尺寸用于计算相对缩放
-			this.initialImageWidth = imgElement.offsetWidth;
-			this.initialImageHeight = imgElement.offsetHeight;
-
-			// 获取图片所在行的信息
 			this.lineInfoAtDragStart = getLineInfoFromElement(
 				this.view,
 				imgElement
 			);
 
 			if (this.lineInfoAtDragStart) {
-				const { lineText, lineFrom, lineTo } = this.lineInfoAtDragStart;
-				this.originalImagePath = extractFirstImagePath(lineText);
+				const { lineText, lineFrom } = this.lineInfoAtDragStart;
+				const parsedInfo = parseImageSyntaxFromLine(lineText); // 统一调用解析
 
-				if (this.originalImagePath) {
+				if (parsedInfo) {
+					this.draggedImageInfo = {
+						// 初始化 draggedImageInfo
+						path: parsedInfo.path,
+						altText: parsedInfo.altText,
+						sourceWidth: parsedInfo.specifiedWidth,
+						sourceHeight: parsedInfo.specifiedHeight,
+					};
 					console.log(
-						`开始拖拽缩放图片。路径: ${this.originalImagePath}`
+						`图片拖拽准备: Path="${
+							this.draggedImageInfo.path
+						}", Type=${parsedInfo.isHtml ? "HTML" : "MD/Wiki"}, W=${
+							parsedInfo.specifiedWidth
+						}, H=${parsedInfo.specifiedHeight}, Zoom=${
+							parsedInfo.currentZoomPercent
+						}`
 					);
-					// console.log(`行内容: "${lineText}" 从 ${lineFrom} 到 ${lineTo}`);
 
-					// 检查当前是否已经是HTML格式，并提取zoom值
-					const htmlImgRegex =
-						/<img\s[^>]*src="([^"]+)"[^>]*style="[^"]*zoom:\s*(\d+)%[^"]*"[^>]*>/i;
-					const htmlMatch = lineText.match(htmlImgRegex);
-
-					if (
-						htmlMatch &&
-						htmlMatch[1] === this.originalImagePath &&
-						htmlMatch[2]
-					) {
-						this.currentZoomPercent = parseInt(htmlMatch[2], 10);
-						// console.log(`已是HTML格式，当前缩放: ${this.currentZoomPercent}%`);
-						// 不需要转换，直接准备更新zoom
+					// 设置拖拽灵敏度相关的 initialImageWidth
+					if (parsedInfo.specifiedWidth) {
+						this.initialImageWidth = parsedInfo.specifiedWidth;
 					} else {
-						// 不是我们期望的HTML格式，或者路径不匹配，进行转换
-						// console.log("需要转换为HTML <img> 标签或更新现有标签。");
-						this.currentZoomPercent = 100; // 转换时默认100%
-						const newImgTag = `<img src="${this.originalImagePath}" style="zoom: ${this.currentZoomPercent}%;">`;
+						this.initialImageWidth = imgElement.offsetWidth;
+					}
+					if (!this.initialImageWidth || this.initialImageWidth <= 0)
+						this.initialImageWidth = 200;
 
-						// 找到需要替换的Markdown图片语法部分
-						const mdOrWikiRegex =
-							/(?:!\[[^\]]*\]\((?:[^)]+)\))|(?:!\[\[(?:[^|\]]+)(?:\|[^\]]*)?\]\])/;
-						const mdMatch = lineText.match(mdOrWikiRegex);
+					// 图片中心点和初始鼠标距离计算 (逻辑不变)
+					const rect = imgElement.getBoundingClientRect();
+					this.imageCenterX = rect.left + rect.width / 2;
+					this.imageCenterY = rect.top + rect.height / 2;
+					this.dragStartX = event.clientX;
+					this.dragStartY = event.clientY;
+					const initialDxToCenter = event.clientX - this.imageCenterX;
+					const initialDyToCenter = event.clientY - this.imageCenterY;
+					this.initialDistanceToCenter = Math.sqrt(
+						initialDxToCenter * initialDxToCenter +
+							initialDyToCenter * initialDyToCenter
+					);
 
-						if (mdMatch && mdMatch[0]) {
-							const from = lineFrom + (mdMatch.index ?? 0);
-							const to = from + mdMatch[0].length;
-							// console.log(`将替换 "${mdMatch[0]}" 为 "${newImgTag}"`);
+					// 根据解析类型决定行为
+					if (parsedInfo.isHtml) {
+						// 如果是HTML，直接使用解析出的zoom（或默认100%），不需要转换markdown
+						this.currentZoomPercent =
+							parsedInfo.currentZoomPercent !== undefined
+								? parsedInfo.currentZoomPercent
+								: 100;
+						// draggedImageInfo 中的 sourceWidth/Height 已从 parsedInfo 设置，无需再从 style 解析
+						console.log(
+							`处理现有HTML: Zoom=${this.currentZoomPercent}%, 继承尺寸 W=${this.draggedImageInfo.sourceWidth}, H=${this.draggedImageInfo.sourceHeight}`
+						);
+					} else {
+						// Markdown 或 Wikilink，需要转换为HTML
+						this.currentZoomPercent = 100; // 新转换的HTML，zoom从100%开始
 
-							const tr = this.view.state.update({
-								changes: { from, to, insert: newImgTag },
-								selection: {
-									anchor:
-										to +
-										(newImgTag.length - mdMatch[0].length),
-								}, // 尝试将光标移到替换后内容之后
-								userEvent: "image.resize.convert",
-							});
-							this.view.dispatch(tr);
-							// 更新行信息，因为内容已改变
-							this.lineInfoAtDragStart = {
-								...this.lineInfoAtDragStart,
-								lineText:
-									lineText.substring(0, mdMatch.index ?? 0) +
-									newImgTag +
-									lineText.substring(
-										(mdMatch.index ?? 0) + mdMatch[0].length
-									),
-								lineTo:
-									lineTo +
-									(newImgTag.length - mdMatch[0].length),
-							};
-						} else {
-							console.warn(
-								"无法在行中找到Markdown图片语法进行替换。原始路径：",
-								this.originalImagePath,
-								"行内容：",
-								lineText
-							);
-							this.resetDragState(); // 无法进行转换，重置状态
-							return;
-						}
+						let styleString = "";
+						if (this.draggedImageInfo.sourceWidth)
+							styleString += `width: ${this.draggedImageInfo.sourceWidth}px; `;
+						if (this.draggedImageInfo.sourceHeight)
+							styleString += `height: ${this.draggedImageInfo.sourceHeight}px; `;
+						styleString += `zoom: ${this.currentZoomPercent}%;`;
+
+						const safeAltText = this.draggedImageInfo.altText
+							? escapeHtml(this.draggedImageInfo.altText)
+							: "";
+						const newImgTag = `<img src="${
+							this.draggedImageInfo.path
+						}" alt="${safeAltText}" style="${styleString.trim()}">`;
+
+						const from = lineFrom + parsedInfo.startIndexInLine;
+						const to = from + parsedInfo.originalMatch.length;
+
+						console.log(
+							`转换MD/Wiki为HTML: 从 "${parsedInfo.originalMatch}" 到 "${newImgTag}"`
+						);
+						const tr = this.view.state.update({
+							changes: { from, to, insert: newImgTag },
+							selection: {
+								anchor: this.view.state.selection.main.head,
+							},
+							userEvent: "image.resize.convert",
+						});
+						this.view.dispatch(tr);
 					}
 				} else {
 					console.warn(
-						"在 mousedown 时无法从行文本中提取图片路径:",
+						"Mousedown: 无法解析行中的任何图片语法:",
 						lineText
 					);
-					this.resetDragState(); // 获取不到路径，重置
+					this.resetDragState();
 					return;
 				}
 			} else {
-				console.warn("在 mousedown 时无法获取图片所在行的信息。");
-				this.resetDragState(); // 获取不到行信息，重置
+				console.warn("Mousedown: 无法获取图片所在行的信息。");
+				this.resetDragState();
 				return;
 			}
 
-			// 添加全局监听器来处理拖拽过程和结束
+			this.isDragging = true;
 			document.addEventListener(
 				"mousemove",
 				this.handleDocumentMouseMoveWhileDragging
@@ -441,7 +440,7 @@ class ImageHoverViewPlugin {
 			!this.isDragging ||
 			!this.lastHoveredImg ||
 			!this.lineInfoAtDragStart ||
-			!this.originalImagePath
+			!this.draggedImageInfo?.path
 		) {
 			this.resetDragState();
 			return;
@@ -486,117 +485,119 @@ class ImageHoverViewPlugin {
 			!this.isDragging ||
 			!this.lastHoveredImg ||
 			!this.lineInfoAtDragStart ||
-			!this.originalImagePath
+			!this.draggedImageInfo
 		) {
+			// 确保draggedImageInfo存在
 			this.resetDragState();
 			return;
 		}
 		event.preventDefault();
 		event.stopPropagation();
 
-		// 从实时更新的DOM style中获取最终的zoom值
 		const finalZoomMatch = this.lastHoveredImg.style.zoom.match(/(\d+)/);
-		let finalZoomPercent = this.currentZoomPercent; // 默认为拖拽开始时的值
-
+		let finalZoomPercent = this.currentZoomPercent;
 		if (finalZoomMatch && finalZoomMatch[1]) {
 			finalZoomPercent = parseInt(finalZoomMatch[1], 10);
 		}
-		finalZoomPercent = Math.max(10, Math.min(finalZoomPercent, 500)); // 再次确保在范围内
+		finalZoomPercent = Math.max(10, Math.min(finalZoomPercent, 500));
 
 		console.log(`拖拽结束，最终缩放: ${finalZoomPercent}%`);
 
-		// 更新编辑器中的 Markdown/HTML 文本
+		// 构建最终的img标签，包含sourceWidth和sourceHeight（如果存在）
+		let finalStyleString = "";
+		if (this.draggedImageInfo.sourceWidth) {
+			finalStyleString += `width: ${this.draggedImageInfo.sourceWidth}px; `;
+		}
+		if (this.draggedImageInfo.sourceHeight) {
+			finalStyleString += `height: ${this.draggedImageInfo.sourceHeight}px; `;
+		}
+		finalStyleString += `zoom: ${finalZoomPercent}%;`;
+
+		const safeAltTextFinal = this.draggedImageInfo.altText
+			? escapeHtml(this.draggedImageInfo.altText)
+			: "";
+		const newImgTagFinal = `<img src="${
+			this.draggedImageInfo.path
+		}" alt="${safeAltTextFinal}" style="${finalStyleString.trim()}">`;
+
+		// 更新文档中的标签
 		const { lineFrom } = this.lineInfoAtDragStart;
-		const newImgTag = `<img src="${this.originalImagePath}" style="zoom: ${finalZoomPercent}%;">`;
+		// 获取最新的行内容，因为在mousedown时可能已经转换过一次
+		const currentLineContent = this.view.state.doc.lineAt(lineFrom).text;
 
-		// 查找旧的 img 标签或 Markdown 语法进行替换
-		// 优先查找已经存在的 <img src="path" style="zoom: ..."> 结构
-		const htmlImgWithZoomRegex = new RegExp(
-			`<img\\s+src="${this.originalImagePath.replace(
-				/[.*+?^${}()|[\]\\]/g,
-				"\\$&"
-			)}"` + // 转义路径中的特殊字符
-				`[^>]*style="[^"]*zoom:\\s*\\d+%?[^"]*"[^>]*>`,
+		// 更新正则表达式以准确找到我们之前生成或正在操作的img标签
+		// 它应该能匹配到 <img src="path" ... style="..."> 结构
+		const imgTagToReplaceRegex = new RegExp(
+			`<img\\s+src=(?:["']${escapeRegExp(
+				this.draggedImageInfo.path!
+			)}["']|${escapeRegExp(this.draggedImageInfo.path!)})` + // 匹配src
+				`[^>]*>`, // 匹配到标签结束
 			"i"
 		);
-		const htmlImgSimpleRegex = new RegExp(
-			`<img\\s+src="${this.originalImagePath.replace(
-				/[.*+?^${}()|[\]\\]/g,
-				"\\$&"
-			)}"[^>]*>`,
-			"i"
-		);
-		// Markdown 和 Wikilink (作为转换前的备选)
-		const mdOrWikiRegex =
-			/(?:!\[[^\]]*\]\((?:[^)]+)\))|(?:!\[\[(?:[^|\]]+)(?:\|[^\]]*)?\]\])/;
 
-		let fromPos: number | undefined;
-		let toPos: number | undefined;
-		let textToReplaceLength: number | undefined;
+		const matchForUpdate = currentLineContent.match(imgTagToReplaceRegex);
+		let fromPos: number | undefined, toPos: number | undefined;
 
-		// 1. 尝试匹配带zoom的HTML标签 (最理想情况)
-		const currentLineContent = this.view.state.doc.lineAt(lineFrom).text; // 获取最新的行内容
-		let match = currentLineContent.match(htmlImgWithZoomRegex);
-		if (match && match[0]) {
-			fromPos = lineFrom + (match.index ?? 0);
-			textToReplaceLength = match[0].length;
-			toPos = fromPos + textToReplaceLength;
+		if (matchForUpdate && matchForUpdate.index !== undefined) {
+			fromPos = lineFrom + matchForUpdate.index;
+			toPos = fromPos + matchForUpdate[0].length;
 		} else {
-			// 2. 尝试匹配不带zoom的HTML标签 (可能是第一次转换后，拖拽前未找到zoom)
-			match = currentLineContent.match(htmlImgSimpleRegex);
+			// 如果上面没匹配到，可能是因为原始行是Markdown，在mousedown时被替换了，但lineInfoAtDragStart.lineText可能仍是旧的
+			// 这种情况理论上应该在 mousedown 后更新 lineInfoAtDragStart.lineText 或用更可靠的方式定位。
+			// 另一种可能是 DOM 和 Doc 的同步问题。
+			// 作为一个备选，如果上面找不到，并且我们知道它最初是MD/Wikilink，可以尝试用初始的parsedInfo的定位信息
+			// 但这会比较复杂，优先确保上面的正则能找到由插件生成的img标签。
+			console.warn(
+				`MouseUp: 无法在行中找到要更新的 <img /> 标签。行内容: "${currentLineContent}", 期望路径: ${this.draggedImageInfo.path}`
+			);
+			// 尝试使用原始的 markdown/wikilink 匹配信息（如果 mousedown 时没有成功替换或被撤销）
+			// 这一步是为了健壮性，但理想情况下，上面的正则应该能工作
+			const originalSyntaxInfo = parseImageSyntaxFromLine(
+				this.lineInfoAtDragStart.lineText
+			); // 用原始行文本再解析一次
 			if (
-				match &&
-				match[0] &&
-				match[0].includes(this.originalImagePath)
+				originalSyntaxInfo &&
+				originalSyntaxInfo.path === this.draggedImageInfo.path
 			) {
-				// 确保是同一个图片
-				fromPos = lineFrom + (match.index ?? 0);
-				textToReplaceLength = match[0].length;
-				toPos = fromPos + textToReplaceLength;
+				console.log(
+					"MouseUp: 尝试使用原始Markdown/Wikilink位置进行替换。"
+				);
+				fromPos = lineFrom + originalSyntaxInfo.startIndexInLine;
+				toPos = fromPos + originalSyntaxInfo.originalMatch.length;
 			} else {
-				// 3. 尝试匹配原始的Markdown/Wikilink (如果转换步骤因为某些原因未完全执行或在拖拽前被修改)
-				// 这种情况理论上在mousedown时已经被转换，但作为健壮性考虑
-				match = currentLineContent.match(mdOrWikiRegex);
-				if (
-					match &&
-					match[0] &&
-					(match[0].includes(this.originalImagePath) ||
-						extractFirstImagePath(match[0]) ===
-							this.originalImagePath)
-				) {
-					fromPos = lineFrom + (match.index ?? 0);
-					textToReplaceLength = match[0].length;
-					toPos = fromPos + textToReplaceLength;
-				}
+				this.resetDragState();
+				return;
 			}
 		}
 
-		if (
-			fromPos !== undefined &&
-			toPos !== undefined &&
-			textToReplaceLength !== undefined
-		) {
-			// console.log(`准备更新文档: 从 ${fromPos} 到 ${toPos}, 替换为 "${newImgTag}"`);
+		if (fromPos !== undefined && toPos !== undefined) {
 			const tr = this.view.state.update({
-				changes: { from: fromPos, to: toPos, insert: newImgTag },
-				selection: { anchor: this.view.state.selection.main.head }, // 保持光标位置
+				changes: { from: fromPos, to: toPos, insert: newImgTagFinal },
+				selection: { anchor: this.view.state.selection.main.head },
 				userEvent: "image.resize.update",
 			});
 			this.view.dispatch(tr);
 			console.log(
-				`图片 "${this.originalImagePath}" 的缩放已更新为 ${finalZoomPercent}%`
-			);
-		} else {
-			console.warn(
-				"拖拽结束，但无法在文档中定位到要更新的图片标签。行内容：",
-				currentLineContent,
-				"期望路径：",
-				this.originalImagePath
+				`图片 "${
+					this.draggedImageInfo.path
+				}" 样式已更新: ${finalStyleString.trim()}`
 			);
 		}
-
-		this.resetDragState(); // 清理拖拽状态
-		// 主动清除一下高亮图片的引用，确保下次悬停时重新判断
-		// this.clearActiveImageState(); // 根据需要，看是否需要立即清除，或者等下一次mousemove
+		this.resetDragState();
 	}
+}
+
+// 辅助函数: 转义HTML特殊字符 (用于alt属性)
+function escapeHtml(unsafe: string): string {
+	return unsafe
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
+}
+
+// 辅助函数: 转义正则表达式特殊字符
+function escapeRegExp(string: string): string {
+	return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
