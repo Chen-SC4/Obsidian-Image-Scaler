@@ -3,9 +3,8 @@
 	"name": "Obsidian Image Scaler",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"description": "This plugin allows you to scale images by dragging the edge of the image with your mouse.",
+	"author": "Chen Mo",
+	"authorUrl": "https://github.com/Chen-SC4?tab=repositories",
 	"isDesktopOnly": false
 }
